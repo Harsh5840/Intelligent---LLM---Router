@@ -6,7 +6,13 @@ import hashlib
 import json
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
-import redis.asyncio as redis
+
+try:
+    import redis.asyncio as redis
+    REDIS_AVAILABLE = True
+except ImportError:
+    redis = None
+    REDIS_AVAILABLE = False
 from src.utils.logging import get_logger
 from src.config import settings
 from src.utils.metrics import CACHE_HITS, CACHE_MISSES
@@ -26,13 +32,17 @@ class CacheService:
     """
 
     def __init__(self):
-        self.redis_client: Optional[redis.Redis] = None
+        self.redis_client: Optional[Any] = None
         self._initialize_redis()
 
     def _initialize_redis(self) -> None:
         """Initialize Redis connection"""
         if not settings.enable_caching:
             logger.info("caching_disabled")
+            return
+
+        if not REDIS_AVAILABLE:
+            logger.warning("redis_package_not_installed")
             return
 
         try:
@@ -98,6 +108,26 @@ class CacheService:
         except Exception as e:
             logger.error("cache_get_failed", error=str(e))
             return None
+
+    async def get_cached_response_any_model(
+        self,
+        query: str,
+        models: list[str],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve cached response by checking multiple models.
+
+        Useful when routing may pick different models for the same query.
+        """
+        if self.redis_client is None:
+            return None
+
+        for model in models:
+            cached = await self.get_cached_response(query, model)
+            if cached:
+                return cached
+
+        return None
 
     async def cache_response(
         self,
@@ -175,12 +205,12 @@ class CacheService:
             return 0
 
         try:
+            query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
             if model:
                 cache_key = self._generate_cache_key(query, model)
                 deleted = await self.redis_client.delete(cache_key)
             else:
                 # Invalidate for all models
-                query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
                 pattern = f"cache:query:*:{query_hash}"
                 keys = await self.redis_client.keys(pattern)
                 deleted = await self.redis_client.delete(*keys) if keys else 0
@@ -232,6 +262,17 @@ class CacheService:
         if self.redis_client:
             await self.redis_client.close()
             logger.info("redis_connection_closed")
+
+    async def ping(self) -> bool:
+        """Check Redis connectivity."""
+        if self.redis_client is None:
+            return False
+
+        try:
+            return bool(await self.redis_client.ping())
+        except Exception as e:
+            logger.error("redis_ping_failed", error=str(e))
+            return False
 
 
 # Global cache service instance

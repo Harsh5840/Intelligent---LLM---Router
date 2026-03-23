@@ -6,7 +6,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from src.models.database import Base, RoutingLogDB, FeedbackDB, ModelPerformanceDB
 from src.models.schemas import RoutingLog, FeedbackRequest
 from src.config import settings
@@ -291,6 +291,80 @@ class DataCollectionService:
         except Exception as e:
             logger.error("training_data_fetch_failed", error=str(e))
             return []
+
+    async def get_aggregate_stats(self) -> Dict[str, Any]:
+        """
+        Get aggregate runtime statistics from routing logs.
+
+        Returns:
+            Dict with total_requests, avg_latency_ms, model_distribution, error_rate
+        """
+        if self.async_session_factory is None:
+            return {
+                "total_requests": 0,
+                "avg_latency_ms": 0.0,
+                "model_distribution": {},
+                "error_rate": 0.0,
+            }
+
+        try:
+            async with self.async_session_factory() as session:
+                total_requests_result = await session.execute(
+                    select(func.count()).select_from(RoutingLogDB)
+                )
+                total_requests = total_requests_result.scalar() or 0
+
+                avg_latency_result = await session.execute(
+                    select(func.avg(RoutingLogDB.latency_ms))
+                )
+                avg_latency_ms = float(avg_latency_result.scalar() or 0.0)
+
+                error_count_result = await session.execute(
+                    select(func.count()).select_from(RoutingLogDB).where(RoutingLogDB.success == False)
+                )
+                error_count = error_count_result.scalar() or 0
+
+                model_distribution_result = await session.execute(
+                    select(
+                        RoutingLogDB.model_used,
+                        func.count().label("count"),
+                    )
+                    .group_by(RoutingLogDB.model_used)
+                )
+                model_distribution = {
+                    model_name: count
+                    for model_name, count in model_distribution_result.all()
+                }
+
+                error_rate = (error_count / total_requests) if total_requests > 0 else 0.0
+
+                return {
+                    "total_requests": int(total_requests),
+                    "avg_latency_ms": avg_latency_ms,
+                    "model_distribution": model_distribution,
+                    "error_rate": error_rate,
+                }
+        except Exception as e:
+            logger.error("aggregate_stats_failed", error=str(e))
+            return {
+                "total_requests": 0,
+                "avg_latency_ms": 0.0,
+                "model_distribution": {},
+                "error_rate": 0.0,
+            }
+
+    async def ping(self) -> bool:
+        """Check database connectivity."""
+        if self.async_session_factory is None:
+            return False
+
+        try:
+            async with self.async_session_factory() as session:
+                await session.execute(text("SELECT 1"))
+            return True
+        except Exception as e:
+            logger.error("database_ping_failed", error=str(e))
+            return False
 
     async def close(self) -> None:
         """Close database connection"""

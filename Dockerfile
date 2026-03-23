@@ -35,7 +35,6 @@ COPY --from=builder --chown=router:router /root/.local /home/router/.local
 
 # Copy application code
 COPY --chown=router:router src/ ./src/
-COPY --chown=router:router training/ ./training/
 
 # Set Python path
 ENV PATH=/home/router/.local/bin:$PATH
@@ -49,7 +48,7 @@ EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/api/v1/health')"
+    CMD python -c "from urllib.request import urlopen; urlopen('http://localhost:8000/api/v1/health').read()"
 
 # Run application
 CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

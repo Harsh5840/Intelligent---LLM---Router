@@ -1,0 +1,31 @@
+### Health
+GET http://localhost:8000/api/v1/health
+
+### List models
+GET http://localhost:8000/api/v1/models
+
+### Chat - coding query
+POST http://localhost:8000/api/v1/chat
+Content-Type: application/json
+
+{
+  "query": "Write a Python function to reverse a linked list and explain time complexity.",
+  "user_id": "demo-user-1",
+  "user_tier": "pro"
+}
+
+### Chat - analytical query
+POST http://localhost:8000/api/v1/chat
+Content-Type: application/json
+
+{
+  "query": "Compare Redis and PostgreSQL caching strategies with pros and cons for read-heavy systems.",
+  "user_id": "demo-user-2",
+  "user_tier": "free"
+}
+
+### Stats
+GET http://localhost:8000/api/v1/stats
+
+### Metrics (Prometheus format)
+GET http://localhost:8000/api/v1/metrics

@@ -12,7 +12,7 @@ from src.models.schemas import (
     HealthCheck,
     MetricsResponse,
 )
-from src.services.model_registry import model_registry
+from src.services.model_registry import model_registry, MODEL_CONFIGS
 from src.services.feature_extractor import feature_extractor
 from src.services.router import router
 from src.services.cache import cache_service
@@ -58,9 +58,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
         )
 
         # PHASE 8: Check cache first
-        cached = await cache_service.get_cached_response(
+        cached = await cache_service.get_cached_response_any_model(
             request.query,
-            settings.default_model,
+            list(MODEL_CONFIGS.keys()),
         )
 
         if cached:
@@ -179,6 +179,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
             },
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(
             "chat_request_failed",
@@ -281,6 +283,7 @@ async def get_stats() -> MetricsResponse:
     try:
         # Get cache stats
         cache_stats = await cache_service.get_cache_stats()
+        aggregate_stats = await data_collection_service.get_aggregate_stats()
         
         # Calculate cache hit rate
         total_cache_requests = (
@@ -292,18 +295,12 @@ async def get_stats() -> MetricsResponse:
             else 0.0
         )
 
-        # TODO: Fetch actual stats from database
-        # For now, return mock data
         return MetricsResponse(
-            total_requests=total_cache_requests,
+            total_requests=aggregate_stats["total_requests"],
             cache_hit_rate=cache_hit_rate,
-            avg_latency_ms=500.0,
-            model_distribution={
-                "llama-7b": 60,
-                "gpt-4": 25,
-                "claude-sonnet": 15,
-            },
-            error_rate=0.02,
+            avg_latency_ms=aggregate_stats["avg_latency_ms"],
+            model_distribution=aggregate_stats["model_distribution"],
+            error_rate=aggregate_stats["error_rate"],
         )
 
     except Exception as e:

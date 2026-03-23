@@ -38,6 +38,23 @@ async def lifespan(app: FastAPI):
     # Initialize database tables
     await data_collection_service.create_tables()
 
+    if settings.app_env == "production":
+        db_ok = await data_collection_service.ping()
+        cache_ok = True
+
+        if settings.enable_caching:
+            cache_ok = await cache_service.ping()
+
+        if not db_ok:
+            logger.error("startup_dependency_failed", dependency="database")
+            raise RuntimeError("Database unavailable in production mode")
+
+        if settings.enable_caching and not cache_ok:
+            logger.error("startup_dependency_failed", dependency="redis")
+            raise RuntimeError("Redis unavailable while caching is enabled")
+
+        logger.info("startup_dependencies_verified")
+
     logger.info("application_ready")
 
     yield

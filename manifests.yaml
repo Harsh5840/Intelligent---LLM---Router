@@ -29,6 +29,7 @@ metadata:
   namespace: llm-router
 type: Opaque
 stringData:
+  POSTGRES_PASSWORD: "CHANGE_ME"
   DATABASE_URL: "postgresql+asyncpg://router:CHANGE_ME@postgres:5432/router_db"
   REDIS_URL: "redis://redis:6379/0"
   OPENAI_API_KEY: "sk-placeholder"

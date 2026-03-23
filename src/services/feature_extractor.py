@@ -6,7 +6,13 @@ import re
 import asyncio
 from typing import Dict, Any, List, Optional
 import numpy as np
-from sentence_transformers import SentenceTransformer
+
+try:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SentenceTransformer = None
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
 from src.models.schemas import QueryFeatures
 from src.utils.logging import get_logger
 
@@ -49,6 +55,11 @@ class FeatureExtractor:
 
     def _load_embedding_model(self) -> None:
         """Load sentence transformer model for embeddings"""
+        if not SENTENCE_TRANSFORMERS_AVAILABLE:
+            logger.warning("sentence_transformers_not_installed")
+            self.embedding_model = None
+            return
+
         try:
             # Use a lightweight model for production
             self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
