@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   # ============================================================================
   # LLM Router API
@@ -18,8 +20,10 @@ services:
       - ENABLE_ML_ROUTING=false
       - ENABLE_RAG_ROUTING=false
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - router-network
     restart: unless-stopped
@@ -74,6 +78,50 @@ services:
       retries: 5
 
   # ============================================================================
+  # Prometheus - Metrics Collection
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: llm-router-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=7d'
+      - '--storage.tsdb.retention.size=512MB'
+    networks:
+      - router-network
+    restart: unless-stopped
+    depends_on:
+      - router-api
+
+  # ============================================================================
+  # Grafana - Metrics Visualization
+  # ============================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: llm-router-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - router-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # ============================================================================
   # Nginx Reverse Proxy (PHASE 10)
   # ============================================================================
   nginx:
@@ -97,3 +145,5 @@ networks:
 volumes:
   postgres-data:
   redis-data:
+  prometheus-data:
+  grafana-data:
