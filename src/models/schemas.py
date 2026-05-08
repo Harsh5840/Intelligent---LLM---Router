@@ -64,13 +64,55 @@ class QueryFeatures(BaseModel):
 
 
 class RoutingDecision(BaseModel):
-    """Decision made by the router"""
+    """Production-grade routing decision with full observability"""
 
-    selected_model: str
-    reason: str
-    confidence: float = Field(ge=0.0, le=1.0)
+    # Core decision
+    model_selected: str = Field(..., description="Selected model name")
+    routing_method: str = Field(
+        ..., description="Routing method: rule_based, ml_scoring, rag_based, fallback"
+    )
+    complexity_tier: str = Field(
+        ..., description="Query complexity tier: low, medium, high"
+    )
+    complexity_score: float = Field(..., ge=0.0, le=1.0)
+    
+    # Explanation
+    routing_reason: str = Field(
+        ..., description="Human-readable reason for selection"
+    )
+    cost_estimate_usd: float = Field(..., ge=0.0)
+    
+    # Fallback tracking
+    fallback_used: bool = False
+    fallback_reason: Optional[str] = None
+    
+    # Candidate analysis for explainability
+    candidates_scored: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="All candidates considered with scores"
+    )
+    
+    # Performance metadata
+    routing_overhead_ms: float = Field(default=0.0)
+    
+    # Legacy fields for backward compatibility
+    selected_model: Optional[str] = None
+    reason: Optional[str] = None
+    confidence: Optional[float] = None
     alternatives: Optional[List[Dict[str, Any]]] = None
-    fallback: bool = False
+    fallback: Optional[bool] = None
+    
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Map new fields to legacy fields for backward compatibility
+        if self.selected_model is None:
+            self.selected_model = self.model_selected
+        if self.reason is None:
+            self.reason = self.routing_reason
+        if self.confidence is None:
+            self.confidence = self.complexity_score
+        if self.fallback is None:
+            self.fallback = self.fallback_used
 
 
 # ============================================================================

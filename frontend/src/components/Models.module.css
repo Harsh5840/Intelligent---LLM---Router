@@ -1,0 +1,202 @@
+.section {
+  padding: 120px 0;
+}
+
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.sectionHeader { text-align: center; margin-bottom: 64px; }
+.sectionLabel {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--accent-emerald);
+  background: var(--accent-emerald-dim); padding: 5px 14px;
+  border-radius: var(--radius-full); border: 1px solid rgba(52,211,153,0.2);
+}
+.sectionTitle {
+  font-size: clamp(28px, 4vw, 40px); font-weight: 800;
+  letter-spacing: -0.03em; margin-top: 20px; margin-bottom: 12px;
+}
+.sectionDesc { font-size: 16px; color: var(--text-secondary); max-width: 560px; margin: 0 auto; }
+
+/* ── Model Grid ────────────────────────── */
+.modelGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-bottom: 56px;
+}
+
+.modelCard {
+  position: relative;
+  padding: 28px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+  transition: all var(--transition-base);
+}
+
+.modelCard:hover {
+  border-color: var(--model-color);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+}
+
+.cardGlow {
+  position: absolute;
+  top: -60px;
+  right: -60px;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: var(--model-color);
+  opacity: 0.06;
+  filter: blur(60px);
+  pointer-events: none;
+  transition: opacity var(--transition-slow);
+}
+
+.modelCard:hover .cardGlow { opacity: 0.12; }
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.modelIcon { font-size: 32px; }
+
+.modelName {
+  font-size: 17px; font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--model-color);
+}
+
+.modelProvider {
+  font-size: 12px; color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+.qualityBadge {
+  margin-left: auto;
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+
+.modelDesc {
+  font-size: 13px; color: var(--text-secondary);
+  line-height: 1.6; margin-bottom: 20px;
+}
+
+.specGrid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  margin-bottom: 20px;
+}
+
+.specItem {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.02);
+}
+
+.specLabel {
+  font-size: 10px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+
+.specValue {
+  font-size: 14px; font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-primary);
+}
+
+/* ── Quality Bars ──────────────────────── */
+.barRow {
+  display: flex; flex-direction: column; gap: 8px;
+}
+
+.barGroup {
+  display: flex; align-items: center; gap: 10px;
+}
+
+.barLabel {
+  font-size: 10px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  width: 100px; flex-shrink: 0;
+}
+
+.bar {
+  flex: 1; height: 6px; border-radius: 3px;
+  background: rgba(255,255,255,0.05);
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%; border-radius: 3px;
+  transition: width 0.8s var(--ease-out);
+}
+
+/* ── Weights Card ──────────────────────── */
+.weightsCard {
+  padding: 36px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+}
+
+.weightsTitle {
+  font-size: 20px; font-weight: 700;
+  letter-spacing: -0.02em; margin-bottom: 8px;
+}
+
+.weightsDesc {
+  font-size: 14px; color: var(--text-secondary);
+  margin-bottom: 28px;
+}
+
+.weightsGrid {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px;
+}
+
+.weightItem {}
+
+.weightHeader {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.weightLabel {
+  font-size: 13px; font-weight: 600; color: var(--text-secondary);
+}
+
+.weightValue {
+  font-size: 18px; font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.weightBar {
+  height: 6px; border-radius: 3px;
+  background: rgba(255,255,255,0.05);
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.weightFill {
+  height: 100%; border-radius: 3px;
+  transition: width 0.8s var(--ease-out);
+}
+
+.flagLabel {
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-muted);
+}
+
+@media (max-width: 900px) {
+  .modelGrid { grid-template-columns: 1fr; }
+  .weightsGrid { grid-template-columns: repeat(2, 1fr); }
+}

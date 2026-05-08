@@ -62,3 +62,7 @@ class LLMClient(ABC):
     def get_model_name(self) -> str:
         """Get the model name"""
         return self.config.name
+
+    def is_configured(self) -> bool:
+        """Whether this client has required runtime configuration."""
+        return True

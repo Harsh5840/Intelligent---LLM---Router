@@ -47,7 +47,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
     6. Log decision (Phase 4)
     """
     start_time = time.time()
-    request_id = None
+    request_id = None #for correlating logs and metrics across the request lifecycle
 
     try:
         logger.info(
@@ -60,7 +60,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         # PHASE 8: Check cache first
         cached = await cache_service.get_cached_response_any_model(
             request.query,
-            list(MODEL_CONFIGS.keys()),
+            list(MODEL_CONFIGS.keys()),  # it is important to pass the list of models here
         )
 
         if cached:
@@ -76,10 +76,10 @@ async def chat(request: ChatRequest) -> ChatResponse:
             )
 
         # PHASE 2: Extract features
-        features = await feature_extractor.extract_features(request.query)
+        features = await feature_extractor.extract_features(request.query)  #features is a pydantic model with all the extracted features like complexity, is_coding, is_analytical, is_creative
         
         # Generate embedding for advanced routing (Phase 6)
-        embedding = None
+        embedding = None #embedding is a list of floats representing the semantic embedding of the query, used for advanced routing decisions in Phase 6. We only generate it if RAG routing is enabled to save resources for simpler queries. The embedding will be passed to the router to help it make a more informed decision about which model to route to based on semantic similarity and other factors.
         if settings.enable_rag_routing:
             embedding = await feature_extractor.generate_embedding(request.query)
 
@@ -99,62 +99,112 @@ async def chat(request: ChatRequest) -> ChatResponse:
             confidence=routing_decision.confidence,
         )
 
-        # Get model client and generate response
-        client = model_registry.get_client(routing_decision.selected_model)
-
-        if client is None:
-            raise HTTPException(
-                status_code=503,
-                detail=f"Model {routing_decision.selected_model} not available",
-            )
-
-        # Generate response
-        result = await client.generate(
-            prompt=request.query,
-            temperature=0.7,
+        # Build runtime fallback chain for resilient generation
+        candidate_models = [routing_decision.selected_model]
+        candidate_models.extend(
+            [alt.get("model") for alt in (routing_decision.alternatives or []) if alt.get("model")]
         )
+        candidate_models.extend([settings.fallback_model, settings.default_model])
+
+        deduped_candidates = list(dict.fromkeys(candidate_models))
+
+        result = None
+        model_used = routing_decision.selected_model
+        generation_error = None
+        selected_client = None
+
+        for candidate_model in deduped_candidates:
+            client = model_registry.get_client(candidate_model)
+            if client is None:
+                logger.warning("model_client_missing", model=candidate_model)
+                continue
+
+            try:
+                result = await client.generate(
+                    prompt=request.query,
+                    temperature=0.7,
+                )
+                model_used = candidate_model
+                selected_client = client
+                break
+            except Exception as e:
+                generation_error = e
+                logger.error(
+                    "model_generation_failed",
+                    model=candidate_model,
+                    error=str(e),
+                )
+
+        if result is None:
+            detail = "No model could successfully generate a response"
+            if generation_error is not None:
+                detail = f"{detail}: {str(generation_error)}"
+            raise HTTPException(status_code=503, detail=detail)
+
+        runtime_fallback = model_used != routing_decision.selected_model
+        if runtime_fallback:
+            logger.warning(
+                "runtime_fallback_used",
+                requested_model=routing_decision.selected_model,
+                final_model=model_used,
+            )
 
         # Calculate total latency
         total_latency_ms = (time.time() - start_time) * 1000
-
+ 
         # PHASE 8: Cache the response
         if settings.enable_caching:
             await cache_service.cache_response(
                 query=request.query,
-                model=routing_decision.selected_model,
+                model=model_used,
                 response=result["response"],
                 latency_ms=result["latency_ms"],
             )
 
         # PHASE 4: Log routing decision
-        cost_estimate = client.estimate_cost(result["tokens_used"])
+        cost_estimate = selected_client.estimate_cost(result["tokens_used"])
         
         request_id = await data_collection_service.log_routing_decision(
             query=request.query,
             user_id=request.user_id,
             features=features.model_dump(),
-            model_used=routing_decision.selected_model,
+            model_used=model_used,
             latency_ms=total_latency_ms,
             cost_estimate=cost_estimate,
             success=True,
             embedding=embedding,
         )
 
+        if (
+            settings.enable_rag_routing
+            and embedding is not None
+            and request_id is not None
+            and router.rag_service is not None
+        ):
+            await router.rag_service.index_routing_log(
+                log_id=str(request_id),
+                query=request.query,
+                embedding=embedding,
+                model_used=model_used,
+                latency_ms=total_latency_ms,
+                success=True,
+            )
+
         # Update metrics
         REQUEST_COUNT.labels(
-            model=routing_decision.selected_model,
+            model=model_used,
             endpoint="/chat",
         ).inc()
 
         REQUEST_LATENCY.labels(
-            model=routing_decision.selected_model,
+            model=model_used,
             endpoint="/chat",
         ).observe(total_latency_ms / 1000)
 
         logger.info(
             "chat_request_complete",
             user_id=request.user_id,
-            model=routing_decision.selected_model,
+            model=model_used,
             latency_ms=total_latency_ms,
             cost=cost_estimate,
             request_id=request_id,
@@ -162,13 +212,15 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
         return ChatResponse(
             response=result["response"],
-            model_used=routing_decision.selected_model,
+            model_used=model_used,
             latency_ms=total_latency_ms,
             routing_metadata={
                 "reason": routing_decision.reason,
                 "confidence": routing_decision.confidence,
                 "alternatives": routing_decision.alternatives,
-                "fallback": routing_decision.fallback,
+                "fallback": routing_decision.fallback or runtime_fallback,
+                "selected_model": routing_decision.selected_model,
+                "runtime_model": model_used,
                 "request_id": str(request_id) if request_id else None,
                 "features": {
                     "complexity": feature_extractor.calculate_complexity_score(features),

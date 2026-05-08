@@ -144,3 +144,20 @@ If I had to explain the design in an interview, I’d say:
 ## One-line summary for recruiters
 
 “I built a production-style intelligent routing layer for LLM applications that dynamically chooses the best model per request to optimize **quality, latency, reliability, and cost at scale**.”
+
+## Runtime checklist (all phases enabled)
+
+To run all phases in production mode, configure these environment variables:
+
+- Core: `APP_ENV=production`, `DATABASE_URL`, `REDIS_URL`
+- Model APIs: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`
+- Local model: `LOCAL_LLAMA_ENDPOINT` (must expose `/generate` and `/health`)
+- Phase 5 (ML routing): `ENABLE_ML_ROUTING=true`, `ML_COMPLEXITY_MODEL_PATH`, `ML_DOMAIN_MODEL_PATH`
+- Phase 6 (RAG routing): `ENABLE_RAG_ROUTING=true`, `RAG_TOP_K`, `RAG_MIN_SIMILARITY`
+- Optional Pinecone: `PINECONE_API_KEY`, `PINECONE_INDEX_NAME`, `RAG_NAMESPACE`
+
+### Notes on behavior
+
+- If trained ML artifacts are missing, Phase 5 falls back to heuristic scoring (no hard failure).
+- If Pinecone is unavailable, Phase 6 falls back to similarity from stored routing logs/embeddings.
+- Chat generation now uses a runtime fallback chain (`selected -> alternatives -> fallback/default`) for resilience.

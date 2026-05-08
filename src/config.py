@@ -38,6 +38,15 @@ class Settings(BaseSettings):
     # Model APIs
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
+    openai_base_url: str = Field(default="https://api.openai.com/v1", alias="OPENAI_BASE_URL")
+    anthropic_base_url: str = Field(
+        default="https://api.anthropic.com/v1",
+        alias="ANTHROPIC_BASE_URL",
+    )
+    local_llama_endpoint: str = Field(
+        default="http://localhost:8001",
+        alias="LOCAL_LLAMA_ENDPOINT",
+    )
 
     # Model configuration
     default_model: str = Field(default="llama-7b", alias="DEFAULT_MODEL")
@@ -47,6 +56,19 @@ class Settings(BaseSettings):
     enable_ml_routing: bool = Field(default=False, alias="ENABLE_ML_ROUTING")
     enable_rag_routing: bool = Field(default=False, alias="ENABLE_RAG_ROUTING")
     enable_caching: bool = Field(default=True, alias="ENABLE_CACHING")
+
+    # Phase 5 / 6 runtime
+    ml_complexity_model_path: str = Field(
+        default="src/training/models/complexity",
+        alias="ML_COMPLEXITY_MODEL_PATH",
+    )
+    ml_domain_model_path: str = Field(
+        default="src/training/models/domain",
+        alias="ML_DOMAIN_MODEL_PATH",
+    )
+    rag_top_k: int = Field(default=10, alias="RAG_TOP_K")
+    rag_min_similarity: float = Field(default=0.7, alias="RAG_MIN_SIMILARITY")
+    rag_namespace: str = Field(default="routing-logs", alias="RAG_NAMESPACE")
 
     # Performance
     request_timeout: int = Field(default=30, alias="REQUEST_TIMEOUT")

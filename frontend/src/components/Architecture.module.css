@@ -1,0 +1,244 @@
+.section {
+  padding: 120px 0;
+  position: relative;
+}
+
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* ── Section Header ────────────────────── */
+.sectionHeader {
+  text-align: center;
+  margin-bottom: 64px;
+}
+
+.sectionLabel {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-indigo);
+  background: var(--accent-indigo-dim);
+  padding: 5px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(99,102,241,0.2);
+}
+
+.sectionTitle {
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin-top: 20px;
+  margin-bottom: 12px;
+}
+
+.sectionDesc {
+  font-size: 16px;
+  color: var(--text-secondary);
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+/* ── Flow Animation ────────────────────── */
+.flowContainer {
+  margin-bottom: 72px;
+  overflow-x: auto;
+  padding: 16px 0;
+}
+
+.flowTrack {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  min-width: 800px;
+}
+
+.flowNode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  flex-shrink: 0;
+  padding: 0 12px;
+  transition: all var(--transition-base);
+}
+
+.flowIcon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 2px solid var(--border-subtle);
+  font-size: 20px;
+  transition: all var(--transition-base);
+  margin-bottom: 8px;
+}
+
+.flowNodeActive .flowIcon {
+  border-color: var(--accent-indigo);
+  background: var(--accent-indigo-dim);
+  box-shadow: 0 0 24px rgba(99,102,241,0.3);
+  transform: scale(1.15);
+}
+
+.flowNodeDone .flowIcon {
+  border-color: var(--accent-emerald);
+  background: var(--accent-emerald-dim);
+}
+
+.flowLabel {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: color var(--transition-fast);
+}
+
+.flowNodeActive .flowLabel {
+  color: var(--accent-indigo);
+  font-weight: 600;
+}
+
+.flowNodeDone .flowLabel {
+  color: var(--accent-emerald);
+}
+
+.flowConnector {
+  position: absolute;
+  top: 24px;
+  left: calc(50% + 28px);
+  width: 48px;
+  height: 2px;
+  background: var(--border-subtle);
+  transition: background var(--transition-base);
+}
+
+.flowConnectorActive {
+  background: var(--accent-emerald);
+  box-shadow: 0 0 8px rgba(52,211,153,0.3);
+}
+
+/* ── Phase Grid ────────────────────────── */
+.phaseGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 72px;
+}
+
+.phaseCard {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  transition: all var(--transition-base);
+  text-align: left;
+}
+
+.phaseCard:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-medium);
+  transform: translateY(-2px);
+}
+
+.phaseCardActive {
+  border-color: var(--phase-color, var(--accent-indigo));
+  background: var(--bg-card-hover);
+  box-shadow: 0 0 0 1px var(--phase-color, var(--accent-indigo)),
+    inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+.phaseNum {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--phase-color, var(--accent-indigo));
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.phaseTitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.phaseDesc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 12px;
+  flex: 1;
+}
+
+.phaseTech {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-muted);
+}
+
+/* ── Design Decisions ──────────────────── */
+.decisions {
+  margin-top: 24px;
+}
+
+.decisionsTitle {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.decisionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.decisionCard {
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  transition: border-color var(--transition-fast);
+}
+
+.decisionCard:hover {
+  border-color: var(--border-medium);
+}
+
+.decisionQ {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-violet);
+  margin-bottom: 8px;
+}
+
+.decisionA {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+@media (max-width: 900px) {
+  .phaseGrid { grid-template-columns: repeat(2, 1fr); }
+  .decisionGrid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 600px) {
+  .phaseGrid { grid-template-columns: 1fr; }
+}

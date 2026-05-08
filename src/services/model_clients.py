@@ -3,7 +3,6 @@ Concrete implementations of LLM clients
 """
 
 import time
-import asyncio
 from typing import Dict, Any, Optional
 import httpx
 from src.services.llm_client import LLMClient, ModelConfig
@@ -26,7 +25,7 @@ class LlamaClient(LLMClient):
 
     def __init__(self, config: ModelConfig):
         super().__init__(config)
-        self.endpoint = "http://localhost:8001/generate"  # Placeholder endpoint
+        self.endpoint = settings.local_llama_endpoint.rstrip("/")
 
     async def generate(
         self,
@@ -35,16 +34,27 @@ class LlamaClient(LLMClient):
         temperature: float = 0.7,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """Generate response using local Llama model"""
+        """Generate response using local Llama model endpoint"""
         start_time = time.time()
 
         try:
-            # TODO: Replace with actual API call when available
-            # For now, simulate a response
-            await asyncio.sleep(0.5)  # Simulate processing time
+            payload = {
+                "prompt": prompt,
+                "max_tokens": max_tokens or self.config.max_tokens,
+                "temperature": temperature,
+            }
 
-            response_text = f"[Llama-7B Response to: {prompt[:50]}...]"
-            tokens_used = len(prompt.split()) + 50  # Rough estimate
+            timeout = httpx.Timeout(settings.request_timeout)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(f"{self.endpoint}/generate", json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+
+            response_text = data.get("response") or data.get("text")
+            if not response_text:
+                raise ValueError("Local model returned empty response")
+
+            tokens_used = int(data.get("tokens_used") or len(prompt.split()) + 50)
 
             latency_ms = (time.time() - start_time) * 1000
 
@@ -69,8 +79,10 @@ class LlamaClient(LLMClient):
     async def health_check(self) -> bool:
         """Check if Llama endpoint is available"""
         try:
-            # TODO: Implement actual health check
-            return True
+            timeout = httpx.Timeout(5.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(f"{self.endpoint}/health")
+                return resp.status_code < 500
         except Exception:
             return False
 
@@ -86,7 +98,10 @@ class OpenAIClient(LLMClient):
     def __init__(self, config: ModelConfig):
         super().__init__(config)
         self.api_key = settings.openai_api_key
-        self.base_url = "https://api.openai.com/v1/chat/completions"
+        self.base_url = settings.openai_base_url.rstrip("/")
+
+    def is_configured(self) -> bool:
+        return bool(self.api_key)
 
     async def generate(
         self,
@@ -99,12 +114,40 @@ class OpenAIClient(LLMClient):
         start_time = time.time()
 
         try:
-            # TODO: Replace with actual API call when API key is valid
-            # For now, simulate a response
-            await asyncio.sleep(1.0)  # Simulate API latency
+            if not self.api_key:
+                raise RuntimeError("OPENAI_API_KEY not configured")
 
-            response_text = f"[GPT-4 Response to: {prompt[:50]}...]"
-            tokens_used = len(prompt.split()) + 100
+            payload = {
+                "model": self.config.name,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,
+            }
+            if max_tokens is not None:
+                payload["max_tokens"] = max_tokens
+
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
+
+            timeout = httpx.Timeout(settings.request_timeout)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+            choices = data.get("choices", [])
+            if not choices:
+                raise ValueError("OpenAI returned no choices")
+
+            message = choices[0].get("message", {})
+            response_text = message.get("content", "")
+            usage = data.get("usage", {})
+            tokens_used = int(usage.get("total_tokens") or len(prompt.split()) + 100)
 
             latency_ms = (time.time() - start_time) * 1000
 
@@ -129,8 +172,14 @@ class OpenAIClient(LLMClient):
     async def health_check(self) -> bool:
         """Check if OpenAI API is available"""
         try:
-            # TODO: Implement actual health check
-            return True
+            if not self.api_key:
+                return False
+
+            timeout = httpx.Timeout(5.0)
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(f"{self.base_url}/models", headers=headers)
+                return resp.status_code < 500
         except Exception:
             return False
 
@@ -141,7 +190,10 @@ class ClaudeClient(LLMClient):
     def __init__(self, config: ModelConfig):
         super().__init__(config)
         self.api_key = settings.anthropic_api_key
-        self.base_url = "https://api.anthropic.com/v1/messages"
+        self.base_url = settings.anthropic_base_url.rstrip("/")
+
+    def is_configured(self) -> bool:
+        return bool(self.api_key)
 
     async def generate(
         self,
@@ -154,11 +206,39 @@ class ClaudeClient(LLMClient):
         start_time = time.time()
 
         try:
-            # TODO: Replace with actual API call when API key is valid
-            await asyncio.sleep(0.8)  # Simulate API latency
+            if not self.api_key:
+                raise RuntimeError("ANTHROPIC_API_KEY not configured")
 
-            response_text = f"[Claude Sonnet Response to: {prompt[:50]}...]"
-            tokens_used = len(prompt.split()) + 80
+            payload = {
+                "model": self.config.name,
+                "max_tokens": max_tokens or 1024,
+                "temperature": temperature,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+
+            headers = {
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
+
+            timeout = httpx.Timeout(settings.request_timeout)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(
+                    f"{self.base_url}/messages",
+                    json=payload,
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+            content_blocks = data.get("content", [])
+            text_chunks = [block.get("text", "") for block in content_blocks if block.get("type") == "text"]
+            response_text = "\n".join(chunk for chunk in text_chunks if chunk)
+            usage = data.get("usage", {})
+            tokens_used = int(
+                usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+            ) or len(prompt.split()) + 80
 
             latency_ms = (time.time() - start_time) * 1000
 
@@ -183,7 +263,16 @@ class ClaudeClient(LLMClient):
     async def health_check(self) -> bool:
         """Check if Claude API is available"""
         try:
-            # TODO: Implement actual health check
-            return True
+            if not self.api_key:
+                return False
+
+            timeout = httpx.Timeout(5.0)
+            headers = {
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+            }
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(f"{self.base_url}/models", headers=headers)
+                return resp.status_code < 500
         except Exception:
             return False

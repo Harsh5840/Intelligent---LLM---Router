@@ -1,86 +1,59 @@
 """
 Structured logging configuration using structlog
+Production-grade structured logging with request context
 """
 
 import logging
 import sys
-from typing import Any
-import json
+import structlog
 
-try:
-    import structlog
-    STRUCTLOG_AVAILABLE = True
-except ImportError:
-    structlog = None
-    STRUCTLOG_AVAILABLE = False
 from src.config import settings
 
 
-class StdlibCompatLogger:
-    """Compatibility logger that supports structlog-style keyword fields."""
+def setup_logging(log_level: str | None = None) -> None:
+    """
+    Configure production-grade structured logging
+    
+    Features:
+    - Structured output (JSON in production, pretty in dev)
+    - Request ID context propagation
+    - Automatic timestamp in ISO format
+    - Exception info included
+    - Environment-aware formatting
+    """
+    level = log_level or settings.log_level.upper()
 
-    def __init__(self, logger: logging.Logger):
-        self._logger = logger
-
-    def _log(self, level: int, event: str, **kwargs: Any) -> None:
-        if kwargs:
-            try:
-                payload = json.dumps(kwargs, default=str)
-            except Exception:
-                payload = str(kwargs)
-            self._logger.log(level, f"{event} {payload}")
-        else:
-            self._logger.log(level, event)
-
-    def info(self, event: str, **kwargs: Any) -> None:
-        self._log(logging.INFO, event, **kwargs)
-
-    def warning(self, event: str, **kwargs: Any) -> None:
-        self._log(logging.WARNING, event, **kwargs)
-
-    def error(self, event: str, **kwargs: Any) -> None:
-        self._log(logging.ERROR, event, **kwargs)
-
-    def debug(self, event: str, **kwargs: Any) -> None:
-        self._log(logging.DEBUG, event, **kwargs)
-
-
-def setup_logging() -> None:
-    """Configure structured logging for the application"""
-
-    # Configure standard library logging
+    # Configure standard library logging first
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,
-        level=getattr(logging, settings.log_level.upper()),
+        level=getattr(logging, level),
     )
 
-    if not STRUCTLOG_AVAILABLE:
-        logging.getLogger(__name__).warning("structlog_not_installed_using_stdlib")
-        return
+    # Configure structlog processors based on environment
+    is_dev = settings.app_env == "development"
+    
+    processors = [
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.processors.UnicodeDecoder(),
+        structlog.dev.ConsoleRenderer() if is_dev else structlog.processors.JSONRenderer(),
+    ]
 
-    # Configure structlog
     structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.StackInfoRenderer(),
-            structlog.dev.set_exc_info,
-            structlog.processors.TimeStamper(fmt="iso", utc=True),
-            structlog.dev.ConsoleRenderer() if settings.app_env == "development"
-            else structlog.processors.JSONRenderer(),
-        ],
-        wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(logging, settings.log_level.upper())
-        ),
+        processors=processors,
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
 
 
-def get_logger(name: str) -> Any:
-    """Get a structured logger instance"""
-    if STRUCTLOG_AVAILABLE:
-        return structlog.get_logger(name)
-    return StdlibCompatLogger(logging.getLogger(name))
+def get_logger(name: str) -> structlog.stdlib.BoundLogger:
+    """Get a structured logger instance with optional context binding"""
+    return structlog.get_logger(name)

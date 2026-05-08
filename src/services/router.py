@@ -1,11 +1,13 @@
 """
-Routing service - decides which model to use for a given query
+Routing service - decides which model to use for a given query.
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Optional, List
 from src.models.schemas import QueryFeatures, RoutingDecision, ModelCandidate
 from src.services.model_registry import model_registry, MODEL_CONFIGS
 from src.services.feature_extractor import feature_extractor
+from src.services.ml_service import MLRoutingService
+from src.services.rag_service import RoutingRAGService
 from src.utils.logging import get_logger
 from src.config import settings
 
@@ -24,8 +26,22 @@ class Router:
     """
 
     def __init__(self):
-        self.ml_classifier = None  # PHASE 5: Will be loaded here
-        self.rag_service = None    # PHASE 6: Will be loaded here
+        self.ml_classifier: Optional[MLRoutingService] = None
+        self.rag_service: Optional[RoutingRAGService] = None
+
+        if settings.enable_ml_routing:
+            try:
+                self.ml_classifier = MLRoutingService()
+                if not self.ml_classifier.initialized:
+                    logger.warning("ml_routing_using_heuristic_fallback")
+            except Exception as e:
+                logger.error("ml_routing_init_failed", error=str(e))
+
+        if settings.enable_rag_routing:
+            try:
+                self.rag_service = RoutingRAGService()
+            except Exception as e:
+                logger.error("rag_routing_init_failed", error=str(e))
 
     # ========================================================================
     # PHASE 1: Hardcoded Routing (Initial Implementation)
@@ -97,9 +113,10 @@ class Router:
 
         # Fallback if selected model not available
         if not model_registry.is_model_available(selected):
+            requested = selected
             logger.warning("model_unavailable", requested=selected)
             selected = settings.fallback_model
-            reason = f"fallback_from_{selected}"
+            reason = f"fallback_from_{requested}"
             confidence *= 0.8
             fallback = True
         else:
@@ -241,17 +258,33 @@ class Router:
 
     async def _get_ml_score(self, query: str, model_name: str) -> float:
         """
-        PHASE 5: Get ML classifier score
-        TODO: Implement in Phase 5
+        Phase 5: Get ML classifier score.
         """
-        return 0.0
+        if self.ml_classifier is None:
+            return 0.0
+
+        try:
+            return await self.ml_classifier.score_model(query=query, model_name=model_name)
+        except Exception as e:
+            logger.error("ml_score_failed", error=str(e), model=model_name)
+            return 0.0
 
     async def _get_rag_score(self, embedding: List[float], model_name: str) -> float:
         """
-        PHASE 6: Get RAG recommendation score
-        TODO: Implement in Phase 6
+        Phase 6: Get RAG recommendation score.
         """
-        return 0.0
+        if self.rag_service is None:
+            return 0.0
+
+        try:
+            recommendations = await self.rag_service.recommend_model(
+                query_embedding=embedding,
+                top_k=settings.rag_top_k,
+            )
+            return float(recommendations.get(model_name, 0.0))
+        except Exception as e:
+            logger.error("rag_score_failed", error=str(e), model=model_name)
+            return 0.0
 
     # ========================================================================
     # Main Routing Entry Point

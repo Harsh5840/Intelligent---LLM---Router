@@ -3,8 +3,10 @@ FastAPI application entry point
 Production-grade LLM Router with intelligent request routing
 """
 
+import uuid
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from src.api.endpoints import api_router
@@ -16,6 +18,27 @@ from src.config import settings
 # Initialize logging
 setup_logging()
 logger = get_logger(__name__)
+
+
+# ============================================================================
+# Middleware
+# ============================================================================
+
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    """Middleware to add request ID to all requests for correlation"""
+
+    async def dispatch(self, request: Request, call_next):
+        # Generate or extract request ID
+        request_id = request.headers.get("X-Request-Id", str(uuid.uuid4()))
+        request.state.request_id = request_id
+
+        # Call the next middleware/route
+        response = await call_next(request)
+
+        # Add request ID to response headers
+        response.headers["X-Request-Id"] = request_id
+        return response
 
 
 # ============================================================================
@@ -90,6 +113,9 @@ def create_app() -> FastAPI:
     # ========================================================================
     # Middleware Configuration
     # ========================================================================
+
+    # Request ID middleware (must be first for proper request context)
+    app.add_middleware(RequestIdMiddleware)
 
     # CORS middleware
     app.add_middleware(
