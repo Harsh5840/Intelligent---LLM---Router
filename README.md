@@ -161,3 +161,113 @@ To run all phases in production mode, configure these environment variables:
 - If trained ML artifacts are missing, Phase 5 falls back to heuristic scoring (no hard failure).
 - If Pinecone is unavailable, Phase 6 falls back to similarity from stored routing logs/embeddings.
 - Chat generation now uses a runtime fallback chain (`selected -> alternatives -> fallback/default`) for resilience.
+
+---
+
+## Production Observability & Operations
+
+### Structured Logging
+Every request and routing decision is logged with **structured JSON** in production, including:
+- **Request ID** (UUID): propagated through all logs for correlation
+- **Event name**: `router.decision`, `model.call.start`, `cache.hit`, `circuit_breaker.open`, etc.
+- **Model selected**: which model was chosen and why
+- **Routing reason**: human-readable explanation (e.g., "high_complexity_coding")
+- **Duration (ms)**: routing overhead + model call latency
+- **Cost estimate (USD)**: pre-call cost projection
+
+### Prometheus Metrics
+Full production observability with 8+ key metrics:
+- `llm_routing_decisions_total`: decisions per model/method/tier
+- `llm_model_call_duration_ms`: p50/p95/p99 latency distribution
+- `llm_model_call_errors_total`: failures by model and error type
+- `llm_cache_operations_total`: hit/miss counters
+- `llm_circuit_breaker_open`: state gauge per model (1=open, 0=closed)
+- `llm_fallback_triggers_total`: when primary model was skipped
+- `llm_cost_estimate_usd_total`: cumulative spend by model
+- `llm_routing_overhead_ms`: routing decision time (excludes model inference)
+
+### Circuit Breaker
+Per-model resilience with automatic failover:
+- **CLOSED**: normal operation, requests pass through
+- **OPEN**: too many failures (configurable threshold), requests rejected
+- **HALF_OPEN**: recovery testing, one request allowed
+- Automatic recovery after timeout (default 60 seconds)
+- Observable state in Prometheus + structured logs
+
+### Explainable Routing Decisions
+Every API response includes `routing_metadata` with:
+```json
+{
+  "model_selected": "claude-sonnet",
+  "routing_method": "rule_based",
+  "complexity_tier": "high",
+  "complexity_score": 0.72,
+  "routing_reason": "high_complexity_coding",
+  "cost_estimate_usd": 0.025,
+  "fallback_used": false,
+  "fallback_reason": null,
+  "routing_overhead_ms": 12.3,
+  "candidates_scored": [
+    {"model": "claude-sonnet", "score": 0.85, "reason": "matches_rule_2"},
+    {"model": "gpt-4", "score": 0.70, "reason": "overkill_for_tier"}
+  ]
+}
+```
+
+### Running with Full Observability Stack
+
+**Start the complete system (router + PostgreSQL + Redis + Prometheus + Grafana):**
+```bash
+docker compose up -d
+```
+
+Then access:
+- **Router API:** `http://localhost:8000/docs`
+- **Prometheus:** `http://localhost:9090` (raw metrics)
+- **Grafana:** `http://localhost:3000` (admin/admin) — includes pre-built LLM Router dashboard
+
+### Load Testing with Locust
+
+Run realistic traffic generation and verify metrics:
+```bash
+locust -f tests/load/locustfile.py --host=http://localhost:8000
+# Opens web UI at http://localhost:8089
+# Ramp to 100 users over 30 seconds
+# Target: p95 routing overhead < 30ms, p95 total < model latency + 50ms
+```
+
+### Grafana Dashboard
+
+Pre-built dashboard includes:
+- Routing decisions per 5min by model (time series)
+- Model call latency p95/p99 (heatmap)
+- Cache hit rate (gauge)
+- Circuit breaker status per model (stat panel)
+- Fallback trigger rate (time series)
+- Estimated cost per hour by model (stacked area)
+- Routing overhead distribution (histogram)
+
+### CI/CD Pipeline
+
+GitHub Actions workflow (`ci.yml`) runs on every push:
+- ✓ Python syntax check + import validation
+- ✓ Type checking (mypy)
+- ✓ Linting (ruff) + formatting (black)
+- ✓ Unit tests with coverage (pytest)
+- ✓ Security scan (bandit)
+- ✓ Docker build verification
+- ✓ Health checks for all required files
+
+---
+
+## "Definition of Done" for Production Readiness
+
+- [x] Every routing decision logged with request_id, model_selected, routing_reason, complexity_score, duration_ms
+- [x] GET /metrics returns Prometheus metrics with real values
+- [x] Circuit breaker state visible in Prometheus gauge
+- [x] RoutingDecision object returned in every API response under routing_metadata
+- [x] Locust test file exists and validates routing metadata
+- [x] docker compose up brings up router + prometheus + grafana
+- [x] Grafana dashboard loads with all panels populated
+- [x] GitHub Actions CI passes: mypy + ruff + black + pytest + docker build
+- [x] Zero print() statements — all structured logging via structlog
