@@ -1,14 +1,23 @@
 """
 Routing service - decides which model to use for a given query.
+Production-grade with circuit breaker, metrics, and observability.
 """
 
+import time
 from typing import Optional, List
 from src.models.schemas import QueryFeatures, RoutingDecision, ModelCandidate
 from src.services.model_registry import model_registry, MODEL_CONFIGS
 from src.services.feature_extractor import feature_extractor
 from src.services.ml_service import MLRoutingService
 from src.services.rag_service import RoutingRAGService
+from src.services.circuit_breaker import circuit_breaker_registry
 from src.utils.logging import get_logger
+from src.utils.metrics import (
+    routing_decisions_total,
+    routing_overhead_ms,
+    fallback_triggers_total,
+    circuit_breaker_state,
+)
 from src.config import settings
 
 logger = get_logger(__name__)
@@ -53,6 +62,17 @@ class Router:
         PHASE 1 ONLY - Replaced in Phase 3
         """
         return RoutingDecision(
+            model_selected=settings.default_model,
+            routing_method="rule_based",
+            complexity_tier="low",
+            complexity_score=0.0,
+            routing_reason="hardcoded_default",
+            cost_estimate_usd=0.001,
+            fallback_used=False,
+            fallback_reason=None,
+            candidates_scored=[],
+            routing_overhead_ms=0.0,
+            # Legacy fields
             selected_model=settings.default_model,
             reason="hardcoded_default",
             confidence=1.0,
@@ -73,68 +93,149 @@ class Router:
         Rule-based routing using extracted features
         Simple heuristics for model selection
         """
+        start_time = time.time()
         complexity_score = feature_extractor.calculate_complexity_score(features)
+        candidates_scored = []
 
         # Rule 1: Simple queries -> cheap model
         if complexity_score < 0.3 and not features.has_code_block:
             selected = "llama-7b"
-            reason = "simple_query"
-            confidence = 0.9
+            complexity_tier = "low"
+            routing_reason = "simple_query"
+            cost_estimate = 0.001
+            candidates_scored = [
+                {"model": "llama-7b", "score": 0.9, "reason": "matches_rule_1"},
+                {"model": "claude-sonnet", "score": 0.3, "reason": "too_expensive"},
+            ]
 
         # Rule 2: Coding queries with code blocks -> premium model
         elif features.is_coding and features.has_code_block:
             selected = "gpt-4" if user_tier in ["pro", "enterprise"] else "claude-sonnet"
-            reason = "coding_query_with_code"
-            confidence = 0.85
+            complexity_tier = "high"
+            routing_reason = "coding_query_with_code"
+            cost_estimate = 0.05 if selected == "gpt-4" else 0.02
+            candidates_scored = [
+                {"model": selected, "score": 0.85, "reason": "matches_rule_2"},
+            ]
 
         # Rule 3: Long analytical queries -> premium model
         elif features.is_analytical and features.token_count > 100:
             selected = "claude-sonnet"
-            reason = "analytical_query"
-            confidence = 0.8
+            complexity_tier = "medium"
+            routing_reason = "analytical_query"
+            cost_estimate = 0.02
+            candidates_scored = [
+                {"model": "claude-sonnet", "score": 0.8, "reason": "matches_rule_3"},
+            ]
 
         # Rule 4: Creative queries -> medium model
         elif features.is_creative:
             selected = "claude-sonnet"
-            reason = "creative_query"
-            confidence = 0.75
+            complexity_tier = "medium"
+            routing_reason = "creative_query"
+            cost_estimate = 0.02
+            candidates_scored = [
+                {"model": "claude-sonnet", "score": 0.75, "reason": "matches_rule_4"},
+            ]
 
         # Rule 5: Complex queries -> premium model
         elif complexity_score > 0.6:
             selected = "gpt-4" if user_tier == "enterprise" else "claude-sonnet"
-            reason = "high_complexity"
-            confidence = 0.8
+            complexity_tier = "high"
+            routing_reason = "high_complexity"
+            cost_estimate = 0.05 if selected == "gpt-4" else 0.02
+            candidates_scored = [
+                {"model": selected, "score": 0.8, "reason": "matches_rule_5"},
+            ]
 
         # Default: Use cheap model
         else:
             selected = "llama-7b"
-            reason = "default_fallback"
-            confidence = 0.7
+            complexity_tier = "low"
+            routing_reason = "default_fallback"
+            cost_estimate = 0.001
+            candidates_scored = [
+                {"model": "llama-7b", "score": 0.7, "reason": "default"},
+            ]
+
+        # Check circuit breaker
+        breaker = circuit_breaker_registry.get_breaker(selected)
+        fallback_used = False
+        fallback_reason = None
+
+        if not breaker.can_attempt():
+            logger.warning(
+                "circuit_breaker.blocked_request",
+                model=selected,
+                state=breaker.get_state(),
+            )
+            # Try fallback
+            selected = settings.fallback_model
+            fallback_used = True
+            fallback_reason = f"circuit_breaker_open"
+            routing_reason = f"fallback_from_{breaker.model_name}"
+            cost_estimate = 0.001
+            
+            fallback_triggers_total.labels(
+                primary_model=breaker.model_name,
+                fallback_model=selected,
+                reason="circuit_breaker_open",
+            ).inc()
 
         # Fallback if selected model not available
         if not model_registry.is_model_available(selected):
             requested = selected
             logger.warning("model_unavailable", requested=selected)
             selected = settings.fallback_model
-            reason = f"fallback_from_{requested}"
-            confidence *= 0.8
-            fallback = True
-        else:
-            fallback = False
+            routing_reason = f"fallback_from_{requested}"
+            fallback_used = True
+            fallback_reason = "model_unavailable"
+            cost_estimate = 0.001
+            
+            fallback_triggers_total.labels(
+                primary_model=requested,
+                fallback_model=selected,
+                reason="model_unavailable",
+            ).inc()
+
+        routing_overhead = (time.time() - start_time) * 1000
 
         logger.info(
-            "routing_decision",
-            model=selected,
-            reason=reason,
-            confidence=confidence,
-            complexity=complexity_score,
+            "router.decision",
+            model_selected=selected,
+            routing_method="rule_based",
+            complexity_tier=complexity_tier,
+            routing_reason=routing_reason,
+            cost_estimate_usd=cost_estimate,
+            fallback=fallback_used,
+            routing_overhead_ms=routing_overhead,
         )
 
+        # Record metric
+        routing_decisions_total.labels(
+            model_selected=selected,
+            routing_method="rule_based",
+            complexity_tier=complexity_tier,
+        ).inc()
+
+        routing_overhead_ms.observe(routing_overhead)
+
         return RoutingDecision(
+            model_selected=selected,
+            routing_method="rule_based",
+            complexity_tier=complexity_tier,
+            complexity_score=complexity_score,
+            routing_reason=routing_reason,
+            cost_estimate_usd=cost_estimate,
+            fallback_used=fallback_used,
+            fallback_reason=fallback_reason,
+            candidates_scored=candidates_scored,
+            routing_overhead_ms=routing_overhead,
+            # Legacy fields
             selected_model=selected,
-            reason=reason,
-            confidence=confidence,
-            fallback=fallback,
+            reason=routing_reason,
+            confidence=0.8,
+            fallback=fallback_used,
         )
 
     # ========================================================================
@@ -150,13 +251,24 @@ class Router:
     ) -> RoutingDecision:
         """
         Advanced routing using multi-factor optimization
-        Combines ML predictions, RAG, and scoring
+        Combines ML predictions, RAG, circuit breaker, and scoring
         """
+        start_time = time.time()
         candidates: List[ModelCandidate] = []
 
         # Score each available model
         for model_name, config in MODEL_CONFIGS.items():
             if not model_registry.is_model_available(model_name):
+                continue
+
+            # Check circuit breaker first
+            breaker = circuit_breaker_registry.get_breaker(model_name)
+            if not breaker.can_attempt():
+                logger.debug(
+                    "model_excluded_by_circuit_breaker",
+                    model=model_name,
+                    state=breaker.get_state(),
+                )
                 continue
 
             # Calculate individual scores
@@ -201,6 +313,7 @@ class Router:
         candidates.sort(key=lambda x: x.overall_score, reverse=True)
 
         if not candidates:
+            logger.warning("all_models_filtered_by_circuit_breaker")
             return await self.route_rule_based(query, features, user_tier)
 
         best = candidates[0]
@@ -209,15 +322,49 @@ class Router:
             for c in candidates[1:3]
         ]
 
+        complexity_score = feature_extractor.calculate_complexity_score(features)
+        routing_overhead = (time.time() - start_time) * 1000
+
         logger.info(
-            "optimized_routing",
-            model=best.model_name,
-            score=best.overall_score,
-            quality=best.quality_score,
-            cost=best.cost_score,
+            "router.decision",
+            model_selected=best.model_name,
+            routing_method="ml_scoring",
+            complexity_tier="medium",
+            complexity_score=complexity_score,
+            routing_reason="multi_factor_optimization",
+            cost_estimate_usd=0.02,
+            fallback=False,
+            routing_overhead_ms=routing_overhead,
         )
 
+        routing_decisions_total.labels(
+            model_selected=best.model_name,
+            routing_method="ml_scoring",
+            complexity_tier="medium",
+        ).inc()
+
+        routing_overhead_ms.observe(routing_overhead)
+
         return RoutingDecision(
+            model_selected=best.model_name,
+            routing_method="ml_scoring",
+            complexity_tier="medium",
+            complexity_score=best.overall_score,
+            routing_reason="multi_factor_optimization",
+            cost_estimate_usd=0.02,
+            fallback_used=False,
+            fallback_reason=None,
+            candidates_scored=[
+                {
+                    "model": c.model_name,
+                    "score": c.overall_score,
+                    "quality": c.quality_score,
+                    "cost": c.cost_score,
+                }
+                for c in candidates
+            ],
+            routing_overhead_ms=routing_overhead,
+            # Legacy fields
             selected_model=best.model_name,
             reason="multi_factor_optimization",
             confidence=best.overall_score,
