@@ -3,8 +3,9 @@ API endpoints for the LLM router
 """
 
 import time
+import uuid
 from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response, Request
 from src.models.schemas import (
     ChatRequest,
     ChatResponse,
@@ -34,7 +35,7 @@ api_router = APIRouter()
 
 
 @api_router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
     """
     Main chat endpoint - routes query to optimal LLM and returns response
 
@@ -47,11 +48,12 @@ async def chat(request: ChatRequest) -> ChatResponse:
     6. Log decision (Phase 4)
     """
     start_time = time.time()
-    request_id = None #for correlating logs and metrics across the request lifecycle
+    request_id = http_request.state.request_id if hasattr(http_request.state, 'request_id') else str(uuid.uuid4())
 
     try:
         logger.info(
             "chat_request_received",
+            request_id=request_id,
             user_id=request.user_id,
             query_length=len(request.query),
             user_tier=request.user_tier,
@@ -215,6 +217,18 @@ async def chat(request: ChatRequest) -> ChatResponse:
             model_used=model_used,
             latency_ms=total_latency_ms,
             routing_metadata={
+                # New production fields
+                "model_selected": routing_decision.model_selected,
+                "routing_method": getattr(routing_decision, "routing_method", "rule_based"),
+                "complexity_tier": getattr(routing_decision, "complexity_tier", "low"),
+                "complexity_score": getattr(routing_decision, "complexity_score", 0.0),
+                "routing_reason": getattr(routing_decision, "routing_reason", routing_decision.reason),
+                "cost_estimate_usd": getattr(routing_decision, "cost_estimate_usd", 0.0),
+                "fallback_used": getattr(routing_decision, "fallback_used", False),
+                "fallback_reason": getattr(routing_decision, "fallback_reason", None),
+                "routing_overhead_ms": getattr(routing_decision, "routing_overhead_ms", 0.0),
+                "candidates_scored": getattr(routing_decision, "candidates_scored", []),
+                # Legacy fields for backward compatibility
                 "reason": routing_decision.reason,
                 "confidence": routing_decision.confidence,
                 "alternatives": routing_decision.alternatives,
